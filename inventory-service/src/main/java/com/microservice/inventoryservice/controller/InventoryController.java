@@ -20,4 +20,6 @@ public class InventoryController {
     public List<InventoryResponse> isInStock(@RequestParam List<String> skuCode) {
         return inventoryService.isInStock(skuCode);
     }
+
+
 }

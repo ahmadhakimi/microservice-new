@@ -6,18 +6,13 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
 
 //add Configuration annotation
-
 @Configuration
 
 public class WebClientConfig {
-//    @Bean // bean create webclient object and build from WebClient
-//    public WebClient webClient() {
-//        return  WebClient.builder().build();
-//    }
 
-//    We want load balancing to ensure the distribute request evenly across multiple instances
-    @Bean
+    @Bean  // bean create webclient object and build from WebClient
     @LoadBalanced // add load balancing client-side bean
+    //    We want load balancing to ensure the distribute request evenly across multiple instances
     public WebClient.Builder webClientBuilder() {
         return WebClient.builder(); //automatic create WebClient instance load-balancer
         //and calling the inventory services
