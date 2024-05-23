@@ -5,7 +5,7 @@ import com.microservice.orderservice.dto.OrderLineItemsDTO;
 import com.microservice.orderservice.dto.OrderRequest;
 import com.microservice.orderservice.entity.Order;
 import com.microservice.orderservice.entity.OrderLineItems;
-import com.microservice.orderservice.entity.repository.OrderRepository;
+import com.microservice.orderservice.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +44,7 @@ public class OrderService {
         try {
             // Call inventory service and place order if the product is in stock
             InventoryResponse[] inventoryResponsesArray = webClientBuilder.build().get()
-                    .uri("http://localhost:8082/api/inventory", uriBuilder -> uriBuilder
+                    .uri("http://inventory-service/api/inventory", uriBuilder -> uriBuilder
                             .queryParam("skuCode", skuCodes)
                             .build())
                     .retrieve()

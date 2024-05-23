@@ -1,4 +1,4 @@
-package com.microservice.orderservice.entity.repository;
+package com.microservice.orderservice.repository;
 
 import com.microservice.orderservice.entity.Order;
 import org.springframework.data.jpa.repository.JpaRepository;
