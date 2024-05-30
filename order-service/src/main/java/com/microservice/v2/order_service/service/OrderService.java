@@ -1,5 +1,7 @@
 package com.microservice.v2.order_service.service;
 
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.Span;
 import com.microservice.v2.order_service.dto.InventoryResponse;
 import com.microservice.v2.order_service.dto.OrderLineItemsDTO;
 import com.microservice.v2.order_service.dto.OrderRequest;
@@ -25,11 +27,10 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
-
-
+    private final Tracer tracer;
     private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
-    public void placeOrder(OrderRequest orderRequest) {
+    public String placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
 
@@ -47,40 +48,47 @@ public class OrderService {
 
         logger.info("Requesting inventory status for SKUs: {}", skuCodes);
 
-        InventoryResponse[] inventoryResponsesArray = webClientBuilder.build()
-                .get() //GET method from Inventory Controller
-                .uri("http://inventory-service/api/inventory", //uri using the instance of inventory-service, name of the localhost in application.properties
-                        uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes)
-                                .build())
-                .retrieve()  //Executes the request and retrieves the response.
-                .bodyToMono(InventoryResponse[].class)  //Converts the response body to a Mono of InventoryResponse[].
-                .block();//Blocks the call until the response is received, making this a synchronous operation.
-// client ready to start making synchronous request to http://inventory-service/api/inventory
+        // Initiate the calling request from order-service to inventory-service
+        Span inventoryServiceLookUp = tracer.nextSpan().name("InventoryServiceLookUp");
 
-        if (inventoryResponsesArray == null) {
-            throw new IllegalArgumentException("Inventory service did not respond.");
-        }
+        try (io.micrometer.tracing.Tracer.SpanInScope isSpanInScope = tracer.withSpan(inventoryServiceLookUp.start())) {
+            // Execute the whole code
+            InventoryResponse[] inventoryResponsesArray = webClientBuilder.build()
+                    .get() // GET method from Inventory Controller
+                    .uri("http://inventory-service/api/inventory", // URI using the instance of inventory-service, name of the localhost in application.properties
+                            uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes)
+                                    .build())
+                    .retrieve() // Executes the request and retrieves the response.
+                    .bodyToMono(InventoryResponse[].class) // Converts the response body to a Mono of InventoryResponse[].
+                    .block(); // Blocks the call until the response is received, making this a synchronous operation.
+            // Client ready to start making synchronous request to http://inventory-service/api/inventory
 
-        logger.info("Received inventory response: {}", Arrays.toString(inventoryResponsesArray));
+            if (inventoryResponsesArray == null) {
+                throw new IllegalArgumentException("Inventory service did not respond.");
+            }
 
-        logger.info("Received inventory response: {}", Arrays.toString(inventoryResponsesArray));
-        for (InventoryResponse response : inventoryResponsesArray) {
-            logger.info("SKU: {}, In Stock: {}", response.getSkuCode(), response.isInStock());
-        }
+            logger.info("Received inventory response: {}", Arrays.toString(inventoryResponsesArray));
 
+            for (InventoryResponse response : inventoryResponsesArray) {
+                logger.info("SKU: {}, In Stock: {}", response.getSkuCode(), response.isInStock());
+            }
 
-        //create stream of array from java8
-        boolean allProductsInStock = Arrays.stream(inventoryResponsesArray).allMatch(InventoryResponse::isInStock);
+            // Create stream of array from Java 8
+            boolean allProductsInStock = Arrays.stream(inventoryResponsesArray).allMatch(InventoryResponse::isInStock);
 
-
-        if(allProductsInStock){
-            orderRepository.save(order);
-            logger.info("Order placed successfully with order number: {}", order.getOrderNumber());
-
-        } else {
-            throw new IllegalArgumentException("Product is not in stock, please try again later");
+            if (allProductsInStock) {
+                orderRepository.save(order);
+                logger.info("Order placed successfully with order number: {}", order.getOrderNumber());
+                return "Order placed Successfully";
+            } else {
+                throw new IllegalArgumentException("Product is not in stock, please try again later");
+            }
+        } finally {
+            inventoryServiceLookUp.end();
         }
     }
+
+
 
     private OrderLineItems mapToDto(OrderLineItemsDTO orderLineItemsDto) {
         OrderLineItems orderLineItems = new OrderLineItems();
