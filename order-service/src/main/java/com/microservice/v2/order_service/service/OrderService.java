@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 //import org.springframework.kafka.core.KafkaAdmin;
 //import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -33,7 +34,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
     private final Tracer tracer;
-//    private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
+    private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
     private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
     @CircuitBreaker(name = "inventory", fallbackMethod = "fallbackMethod")
@@ -86,7 +87,8 @@ public class OrderService {
 
             if (allProductsInStock) {
                 orderRepository.save(order);
-//                kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()) );
+//                send the message after successfully saved in the repository and place order successfully
+                kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()) );
                 logger.info("Order placed successfully with order number: {}", order.getOrderNumber());
                 return "Order placed Successfully";
             } else {
