@@ -1,5 +1,8 @@
 package com.microservice.v2.order_service.service;
 
+import com.microservice.v2.order_service.event.OrderPlacedEvent;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.Span;
 import com.microservice.v2.order_service.dto.InventoryResponse;
@@ -11,6 +14,8 @@ import com.microservice.v2.order_service.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+//import org.springframework.kafka.core.KafkaAdmin;
+//import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -28,8 +33,11 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
     private final Tracer tracer;
+//    private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
     private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
+    @CircuitBreaker(name = "inventory", fallbackMethod = "fallbackMethod")
+    @TimeLimiter(name = "inventory")
     public String placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
@@ -51,7 +59,7 @@ public class OrderService {
         // Initiate the calling request from order-service to inventory-service
         Span inventoryServiceLookUp = tracer.nextSpan().name("InventoryServiceLookUp");
 
-        try (io.micrometer.tracing.Tracer.SpanInScope isSpanInScope = tracer.withSpan(inventoryServiceLookUp.start())) {
+        try (Tracer.SpanInScope isSpanInScope = tracer.withSpan(inventoryServiceLookUp.start())) {
             // Execute the whole code
             InventoryResponse[] inventoryResponsesArray = webClientBuilder.build()
                     .get() // GET method from Inventory Controller
@@ -69,15 +77,16 @@ public class OrderService {
 
             logger.info("Received inventory response: {}", Arrays.toString(inventoryResponsesArray));
 
-            for (InventoryResponse response : inventoryResponsesArray) {
-                logger.info("SKU: {}, In Stock: {}", response.getSkuCode(), response.isInStock());
-            }
+//            for (InventoryResponse response : inventoryResponsesArray) {
+//                logger.info("SKU: {}, In Stock: {}", response.getSkuCode(), response.isInStock());
+//            }
 
             // Create stream of array from Java 8
             boolean allProductsInStock = Arrays.stream(inventoryResponsesArray).allMatch(InventoryResponse::isInStock);
 
             if (allProductsInStock) {
                 orderRepository.save(order);
+//                kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()) );
                 logger.info("Order placed successfully with order number: {}", order.getOrderNumber());
                 return "Order placed Successfully";
             } else {
@@ -87,15 +96,16 @@ public class OrderService {
             inventoryServiceLookUp.end();
         }
     }
-
-
-
     private OrderLineItems mapToDto(OrderLineItemsDTO orderLineItemsDto) {
         OrderLineItems orderLineItems = new OrderLineItems();
         orderLineItems.setPrice(orderLineItemsDto.getPrice());
         orderLineItems.setQuantity(orderLineItemsDto.getQuantity());
         orderLineItems.setSkuCode(orderLineItemsDto.getSkuCode());
         return orderLineItems;
+    }
+
+    public String fallbackMethod(OrderRequest orderRequest, Throwable throwable) {
+        return "Something went wrong!!, please try again later";
     }
 
 }
