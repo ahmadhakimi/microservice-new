@@ -5,8 +5,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.testcontainers.shaded.org.checkerframework.checker.units.qual.A;
-
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

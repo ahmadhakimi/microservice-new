@@ -107,6 +107,7 @@ public class OrderService {
     }
 
     public String fallbackMethod(OrderRequest orderRequest, Throwable throwable) {
+        logger.error("Fallback method called due to error {}", throwable.getMessage());
         return "Something went wrong!!, please try again later";
     }
 
