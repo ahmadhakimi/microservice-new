@@ -8,6 +8,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +48,33 @@ public class ProductService {
         }).toList();
 
 //              return productList.stream().map(product -> mapAllProduct(product)).toList();
+    }
+
+    public ProductResponse getProductById(String id) {
+        Optional<Product> existingProduct = productRepository.findById(id);
+        return existingProduct.map(product -> {
+            return mapAllProduct(product);
+        }).orElse(null);
+    }
+
+    public ProductResponse updateProduct (String id, ProductRequest productRequest) {
+        Product existingProduct = productRepository.findById(id).orElseThrow(() -> new NoSuchElementException("No product id: " + id));
+        existingProduct.setName(productRequest.getName());
+        existingProduct.setDescription(productRequest.getDescription());
+        existingProduct.setPrice(productRequest.getPrice());
+
+        Product updatedProduct = productRepository.save(existingProduct);
+        return mapAllProduct(updatedProduct);
+
+    }
+
+    public void deleteProduct(String id){
+        Optional<Product> existingProductOptional = productRepository.findById(id);
+        if (existingProductOptional.isPresent()) {
+             productRepository.delete(existingProductOptional.get());
+        } else {
+            throw new NoSuchElementException("No product with id: " + id);
+        }
     }
 
     private ProductResponse mapAllProduct(Product product) {

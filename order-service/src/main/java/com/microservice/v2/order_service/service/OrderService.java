@@ -3,6 +3,8 @@ package com.microservice.v2.order_service.service;
 import com.microservice.v2.order_service.event.OrderPlacedEvent;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.Span;
 import com.microservice.v2.order_service.dto.InventoryResponse;
@@ -33,12 +35,12 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final WebClient.Builder webClientBuilder;
-    private final Tracer tracer;
+    private final ObservationRegistry observationRegistry;
+//    private final Tracer tracer;
     private final KafkaTemplate<String, OrderPlacedEvent> kafkaTemplate;
     private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
-    @CircuitBreaker(name = "inventory", fallbackMethod = "fallbackMethod")
-    @TimeLimiter(name = "inventory")
+
     public String placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
@@ -58,46 +60,47 @@ public class OrderService {
         logger.info("Requesting inventory status for SKUs: {}", skuCodes);
 
         // Initiate the calling request from order-service to inventory-service
-        Span inventoryServiceLookUp = tracer.nextSpan().name("InventoryServiceLookUp");
+        Observation inventoryServiceObservation = Observation.createNotStarted("inventory-service-lookup",
+                this.observationRegistry);
+        inventoryServiceObservation.lowCardinalityKeyValue("call", "inventory-service");
 
-        try (Tracer.SpanInScope isSpanInScope = tracer.withSpan(inventoryServiceLookUp.start())) {
-            // Execute the whole code
-            InventoryResponse[] inventoryResponsesArray = webClientBuilder.build()
-                    .get() // GET method from Inventory Controller
-                    .uri("http://inventory-service/api/inventory", // URI using the instance of inventory-service, name of the localhost in application.properties
-                            uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes)
-                                    .build())
-                    .retrieve() // Executes the request and retrieves the response.
-                    .bodyToMono(InventoryResponse[].class) // Converts the response body to a Mono of InventoryResponse[].
-                    .block(); // Blocks the call until the response is received, making this a synchronous operation.
-            // Client ready to start making synchronous request to http://inventory-service/api/inventory
+        try {
+            return inventoryServiceObservation.observe(() -> {
+                // Execute the whole code
+                InventoryResponse[] inventoryResponsesArray = webClientBuilder.build()
+                        .get() // GET method from Inventory Controller
+                        .uri("http://inventory-service/api/inventory", // URI using the instance of inventory-service, name of the localhost in application.properties
+                                uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes)
+                                        .build())
+                        .retrieve() // Executes the request and retrieves the response.
+                        .bodyToMono(InventoryResponse[].class) // Converts the response body to a Mono of InventoryResponse[].
+                        .block(); // Blocks the call until the response is received, making this a synchronous operation.
+                // Client ready to start making synchronous request to http://inventory-service/api/inventory
 
-            if (inventoryResponsesArray == null) {
-                throw new IllegalArgumentException("Inventory service did not respond.");
-            }
+                if (inventoryResponsesArray == null) {
+                    throw new IllegalArgumentException("Inventory service did not respond.");
+                }
 
-            logger.info("Received inventory response: {}", Arrays.toString(inventoryResponsesArray));
+                logger.info("Received inventory response: {}", Arrays.toString(inventoryResponsesArray));
+                // Create stream of array from Java 8
+                boolean allProductsInStock = Arrays.stream(inventoryResponsesArray).allMatch(InventoryResponse::isInStock);
 
-//            for (InventoryResponse response : inventoryResponsesArray) {
-//                logger.info("SKU: {}, In Stock: {}", response.getSkuCode(), response.isInStock());
-//            }
-
-            // Create stream of array from Java 8
-            boolean allProductsInStock = Arrays.stream(inventoryResponsesArray).allMatch(InventoryResponse::isInStock);
-
-            if (allProductsInStock) {
-                orderRepository.save(order);
-//                send the message after successfully saved in the repository and place order successfully
-                kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()) );
-                logger.info("Order placed successfully with order number: {}", order.getOrderNumber());
-                return "Order placed Successfully";
-            } else {
-                throw new IllegalArgumentException("Product is not in stock, please try again later");
-            }
-        } finally {
-            inventoryServiceLookUp.end();
+                if (allProductsInStock) {
+                    orderRepository.save(order);
+                    // send the message after successfully saved in the repository and place order successfully
+                    kafkaTemplate.send("notificationTopic", new OrderPlacedEvent(order.getOrderNumber()));
+                    logger.info("Order placed successfully with order number: {}", order.getOrderNumber());
+                    return "Order placed Successfully";
+                } else {
+                    throw new IllegalArgumentException("Product is not in stock, please try again later");
+                }
+            });
+        } catch (Throwable throwable) {
+            logger.error("Error occurred during place order: {}", throwable.getMessage());
+            return fallbackMethod(orderRequest, throwable);
         }
     }
+
     private OrderLineItems mapToDto(OrderLineItemsDTO orderLineItemsDto) {
         OrderLineItems orderLineItems = new OrderLineItems();
         orderLineItems.setPrice(orderLineItemsDto.getPrice());
